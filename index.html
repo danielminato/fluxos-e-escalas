@@ -215,27 +215,30 @@
     </section>
     <section class="panel">
       <h2>Dias e turnos abertos</h2>
-      <p class="desc">Ticket médio e nº médio de clientes esperados por turno.</p>
+      <p class="desc">Informativo — quais dias/turnos a operação funciona. Já não define o faturamento (isso vem do painel "Sazonalidade mensal" abaixo).</p>
       <table class="grid-table" id="daysTable"></table>
     </section>
     <section class="panel">
       <h2>Sazonalidade mensal</h2>
-      <p class="desc">Marque "Real" nos meses em que já sabe o faturamento verdadeiro. Clique em "%"/"€" para alternar entre digitar a queda percentual ou o valor de faturamento direto — o outro calcula-se sozinho.</p>
-      <table class="grid-table" id="monthsTable"></table>
+      <p class="desc">Marque o mês de <b>Referência (100%)</b> — o seu melhor faturamento real conhecido. Nos outros meses, escreva a <b>% de queda</b> em relação a essa referência, ou clique em "%"/"€" para escrever o faturamento real direto (a queda calcula-se sozinha). "Real?" é só uma etiqueta sua, não afeta o cálculo.</p>
+      <div style="overflow-x:auto;"><table class="grid-table" id="monthsTable"></table></div>
     </section>
     <section class="panel">
       <h2>Estrutura de custos</h2>
-      <p class="desc">CMV e impostos são taxas proporcionais à receita. As restantes despesas variam mês a mês — útil para refletir redução de equipa fora de época.</p>
+      <p class="desc">CMV e impostos são taxas proporcionais à receita. Os 3 tickets médios são globais (usados em todos os meses) e convertem o mix de faturamento em nº de clientes/pedidos.</p>
       <div class="params-grid">
         <div><label>CMV (% receita)</label><input type="number" id="cmv" step="0.5"></div>
         <div><label>Impostos e taxas (% receita)</label><input type="number" id="impostos" step="0.5"></div>
         <div><label>Salário base por funcionário (€/mês)</label><input type="number" id="salarioBase" step="50"></div>
+        <div><label>Ticket médio Almoço (€)</label><input type="number" id="ticketAlmoco" step="0.5"></div>
+        <div><label>Ticket médio Delivery (€)</label><input type="number" id="ticketDelivery" step="0.5"></div>
+        <div><label>Ticket médio Jantar (€)</label><input type="number" id="ticketJantar" step="0.5"></div>
       </div>
     </section>
     <section class="panel">
       <h2>Despesas mensais</h2>
-      <p class="desc">Nº de funcionários × salário base = despesa com pessoal daquele mês. As restantes linhas são editáveis diretamente.</p>
-      <table class="grid-table" id="expensesTable"></table>
+      <p class="desc">Nº de funcionários × salário base = despesa com pessoal daquele mês. As restantes linhas são editáveis diretamente. A última linha mostra o que sobra depois de todas as despesas.</p>
+      <div style="overflow-x:auto;"><table class="grid-table" id="expensesTable"></table></div>
     </section>
     <section class="panel">
       <h2>Resultado projetado</h2>
@@ -334,17 +337,22 @@ function defaultDias(){
 }
 const MESES_REAIS_PADRAO = ['Mar','Abr','Mai','Jun','Jul'];
 function defaultSazonalidade(){
+  // Agosto é a referência (100%) por padrão. Julho entra com o valor real já apurado.
+  const quedaPadrao = {Jan:65,Fev:60,Mar:50,Abr:35,Mai:20,Jun:10,Jul:0,Ago:0,Set:30,Out:45,Nov:60,Dez:55};
   return MESES.map(m=>({
     mes:m,
-    real: MESES_REAIS_PADRAO.includes(m),
-    modo: 'pct',
-    mult: MESES_REAIS_PADRAO.includes(m)?100 : (['Jun','Jul','Ago','Set'].includes(m)?115:(['Jan','Fev','Nov'].includes(m)?80:95)),
-    valorEur: null
+    real: MESES_REAIS_PADRAO.includes(m) || m==='Ago',
+    isRef: m==='Ago',
+    modo: (m==='Jul' || m==='Ago') ? 'eur' : 'queda',
+    valorEur: m==='Jul' ? 24649 : (m==='Ago' ? 31096 : null),
+    queda: quedaPadrao[m],
+    pctAlmoco: 10, pctDelivery: 0, pctJantar: 90
   }));
 }
 function defaultCustos(){
   return {
     cmv:30, impostos:20, salarioBase:1200,
+    ticketAlmoco:24, ticketDelivery:24, ticketJantar:24,
     pessoalCount: Array(12).fill(7),
     admin: Array(12).fill(600),
     financeiras: Array(12).fill(150),
@@ -354,27 +362,33 @@ function defaultCustos(){
 // Migra cenários antigos (custos em formato plano) para o novo modelo de 12 colunas
 function migrarCustos(c){
   if(!c) return defaultCustos();
-  if(Array.isArray(c.pessoalCount)) return c; // já está no formato novo
-  const salarioBase = 1200;
-  const nFunc = Math.round((c.pessoalFixo || 4500) / salarioBase) || 4;
+  if(Array.isArray(c.pessoalCount) && c.ticketAlmoco!==undefined) return c; // já está no formato mais novo
+  const salarioBase = c.salarioBase || 1200;
+  const nFunc = Array.isArray(c.pessoalCount) ? c.pessoalCount : Array(12).fill(Math.round((c.pessoalFixo || 4500) / salarioBase) || 4);
   return {
     cmv: c.cmv ?? 30,
     impostos: c.impostos ?? 20,
     salarioBase,
-    pessoalCount: Array(12).fill(nFunc),
-    admin: Array(12).fill(c.admin ?? 600),
-    financeiras: Array(12).fill(c.financeiras ?? 150),
-    distribuicao: Array(12).fill(c.distribuicao ?? 1500)
+    ticketAlmoco: c.ticketAlmoco ?? 24,
+    ticketDelivery: c.ticketDelivery ?? 24,
+    ticketJantar: c.ticketJantar ?? 24,
+    pessoalCount: nFunc,
+    admin: Array.isArray(c.admin) ? c.admin : Array(12).fill(c.admin ?? 600),
+    financeiras: Array.isArray(c.financeiras) ? c.financeiras : Array(12).fill(c.financeiras ?? 150),
+    distribuicao: Array.isArray(c.distribuicao) ? c.distribuicao : Array(12).fill(c.distribuicao ?? 1500)
   };
 }
 function migrarSazonalidade(months){
   if(!months) return defaultSazonalidade();
+  const jaTemRef = months.some(m=>m.isRef);
   return months.map(m=>({
     mes: m.mes,
     real: m.real !== undefined ? m.real : MESES_REAIS_PADRAO.includes(m.mes),
-    modo: m.modo || 'pct',
-    mult: m.mult ?? 100,
-    valorEur: m.valorEur ?? null
+    isRef: m.isRef !== undefined ? m.isRef : (!jaTemRef && m.mes==='Ago'),
+    modo: (m.modo==='eur' || m.modo==='queda') ? m.modo : (m.modo==='pct' ? 'queda' : 'eur'),
+    valorEur: m.valorEur ?? (m.mult!==undefined ? null : 0),
+    queda: m.queda ?? (m.mult!==undefined ? (100-m.mult) : 0),
+    pctAlmoco: m.pctAlmoco ?? 10, pctDelivery: m.pctDelivery ?? 0, pctJantar: m.pctJantar ?? 90
   }));
 }
 
@@ -519,11 +533,17 @@ function loadCustosToForm(c){
   document.getElementById('cmv').value = c.cmv;
   document.getElementById('impostos').value = c.impostos;
   document.getElementById('salarioBase').value = c.salarioBase;
+  document.getElementById('ticketAlmoco').value = c.ticketAlmoco;
+  document.getElementById('ticketDelivery').value = c.ticketDelivery;
+  document.getElementById('ticketJantar').value = c.ticketJantar;
 }
 function readCustosFromForm(){
   editState.custos.cmv = parseFloat(document.getElementById('cmv').value)||0;
   editState.custos.impostos = parseFloat(document.getElementById('impostos').value)||0;
   editState.custos.salarioBase = parseFloat(document.getElementById('salarioBase').value)||0;
+  editState.custos.ticketAlmoco = parseFloat(document.getElementById('ticketAlmoco').value)||0;
+  editState.custos.ticketDelivery = parseFloat(document.getElementById('ticketDelivery').value)||0;
+  editState.custos.ticketJantar = parseFloat(document.getElementById('ticketJantar').value)||0;
   return editState.custos;
 }
 function renderDays(){
@@ -543,100 +563,118 @@ function renderDays(){
 }
 function updateDay(i, field, val){
   editState.days[i][field] = (typeof val==='boolean')?val:parseFloat(val)||0;
-  recalcMonthsEurMode();
+}
+function getRefRevenue(){
+  const ref = editState.months.find(m=>m.isRef);
+  return ref ? (ref.valorEur || 0) : 0;
+}
+function receitaDoMes(m, refRevenue){
+  return m.modo==='eur' ? (m.valorEur||0) : refRevenue*(1-(m.queda||0)/100);
+}
+function setReferencia(i){
+  editState.months.forEach((m,idx)=>{ m.isRef = (idx===i); if(idx===i){ m.modo='eur'; m.queda=0; if(!m.valorEur) m.valorEur=0; } });
   renderMonths(); renderExpenses(); computeAndRenderCards();
 }
-function baseMonthlyRevenueOf(days){
-  let weeklyAlmoco=0, weeklyJantar=0;
-  days.forEach(d=>{ if(d.almocoAberto) weeklyAlmoco += d.almocoClientes*d.almocoTicket; if(d.jantarAberto) weeklyJantar += d.jantarClientes*d.jantarTicket; });
-  return { almoco: weeklyAlmoco*(52/12), jantar: weeklyJantar*(52/12) };
-}
-// Mantém o € digitado como fonte da verdade nos meses em modo "€": recalcula o % correspondente
-// sempre que a grade base (dias/turnos) mudar.
-function recalcMonthsEurMode(){
-  const base = baseMonthlyRevenueOf(editState.days);
-  const baseTotal = base.almoco + base.jantar;
-  editState.months.forEach(m=>{
-    if(m.modo==='eur' && m.valorEur!=null && baseTotal>0){
-      m.mult = (m.valorEur / baseTotal) * 100;
-    }
-  });
-}
+function toggleMonthReal(i, val){ editState.months[i].real = val; renderMonths(); }
 function toggleMonthModo(i){
   const m = editState.months[i];
-  const base = baseMonthlyRevenueOf(editState.days);
-  const baseTotal = base.almoco + base.jantar;
-  if(m.modo==='pct'){
+  if(m.isRef) return; // a referência é sempre em €
+  const refRevenue = getRefRevenue();
+  if(m.modo==='queda'){
+    m.valorEur = receitaDoMes(m, refRevenue);
     m.modo = 'eur';
-    m.valorEur = baseTotal * (m.mult/100);
   } else {
-    m.modo = 'pct';
+    m.queda = refRevenue>0 ? (1-(m.valorEur||0)/refRevenue)*100 : 0;
+    m.modo = 'queda';
   }
-  renderMonths(); computeAndRenderCards();
+  renderMonths(); renderExpenses(); computeAndRenderCards();
 }
-function toggleMonthReal(i, val){ editState.months[i].real = val; renderMonths(); }
 function updateMonthValue(i, val){
   const m = editState.months[i];
-  const base = baseMonthlyRevenueOf(editState.days);
-  const baseTotal = base.almoco + base.jantar;
-  if(m.modo==='pct'){
-    m.mult = parseFloat(val)||0;
-  } else {
-    m.valorEur = parseFloat(val)||0;
-    m.mult = baseTotal>0 ? (m.valorEur/baseTotal)*100 : 0;
-  }
+  if(m.modo==='eur') m.valorEur = parseFloat(val)||0;
+  else m.queda = parseFloat(val)||0;
+  renderMonths(); renderExpenses(); computeAndRenderCards();
+}
+function updateMonthMix(i, campo, val){
+  editState.months[i][campo] = parseFloat(val)||0;
   renderMonths(); renderExpenses(); computeAndRenderCards();
 }
 function renderMonths(){
   const t = document.getElementById('monthsTable');
-  const base = baseMonthlyRevenueOf(editState.days);
-  const baseMonthlyAlmoco = base.almoco, baseMonthlyJantar = base.jantar;
-  const ticketAlmocoMedio = editState.days.filter(d=>d.almocoAberto).length ? (editState.days.reduce((s,d)=>s+(d.almocoAberto?d.almocoTicket:0),0)/editState.days.filter(d=>d.almocoAberto).length) : 0;
-  const ticketJantarMedio = editState.days.filter(d=>d.jantarAberto).length ? (editState.days.reduce((s,d)=>s+(d.jantarAberto?d.jantarTicket:0),0)/editState.days.filter(d=>d.jantarAberto).length) : 0;
-  const diasAlmocoAbertos = editState.days.filter(d=>d.almocoAberto).length;
-  const diasJantarAbertos = editState.days.filter(d=>d.jantarAberto).length;
+  const refRevenue = getRefRevenue();
+  const ticketA = parseFloat(document.getElementById('ticketAlmoco')?.value)||0;
+  const ticketD = parseFloat(document.getElementById('ticketDelivery')?.value)||0;
+  const ticketJ = parseFloat(document.getElementById('ticketJantar')?.value)||0;
 
   let html = '<tr><td class="dia">Mês</td>' + editState.months.map(m=>`<td style="font-weight:700;">${m.mes}</td>`).join('') + '</tr>';
   html += '<tr><td class="dia">Real?</td>' + editState.months.map((m,i)=>`<td><input type="checkbox" ${m.real?'checked':''} onchange="toggleMonthReal(${i},this.checked)"></td>`).join('') + '</tr>';
-  html += '<tr><td class="dia">Valor <span style="font-size:9px;">(clique p/ trocar)</span></td>' + editState.months.map((m,i)=>`
-    <td>
+  html += '<tr><td class="dia">Referência (100%)</td>' + editState.months.map((m,i)=>`<td><input type="radio" name="ref" ${m.isRef?'checked':''} onchange="setReferencia(${i})"></td>`).join('') + '</tr>';
+  html += '<tr><td class="dia">Valor <span style="font-size:9px;">(clique p/ trocar)</span></td>' + editState.months.map((m,i)=>{
+    if(m.isRef) return `<td><input type="number" value="${(m.valorEur||0).toFixed(0)}" style="width:74px;" onchange="updateMonthValue(${i},this.value)"><div style="font-size:9px;color:var(--text-soft);">ref. 100%</div></td>`;
+    return `<td>
       <div class="row" style="gap:3px;justify-content:center;flex-wrap:nowrap;">
-        <input type="number" value="${(m.modo==='pct'?m.mult:m.valorEur).toFixed(m.modo==='pct'?0:0)}" style="width:64px;" onchange="updateMonthValue(${i},this.value)">
-        <button class="btn-ghost" style="padding:4px 7px;font-size:10px;" onclick="toggleMonthModo(${i})">${m.modo==='pct'?'%':'€'}</button>
+        <input type="number" value="${(m.modo==='eur'?(m.valorEur||0):(m.queda||0)).toFixed(0)}" style="width:60px;" onchange="updateMonthValue(${i},this.value)">
+        <button class="btn-ghost" style="padding:4px 6px;font-size:10px;" onclick="toggleMonthModo(${i})">${m.modo==='eur'?'€':'%'}</button>
       </div>
-    </td>`).join('') + '</tr>';
-  html += '<tr><td class="dia" style="color:var(--text-soft);font-weight:400;">— Estimado Almoço</td>' + editState.months.map(m=>`<td style="color:var(--text-soft);">${fmtEUR(baseMonthlyAlmoco*(m.mult/100))}</td>`).join('') + '</tr>';
-  html += '<tr><td class="dia" style="color:var(--text-soft);font-weight:400;">— Público Almoço (méd./dia)</td>' + editState.months.map(m=>{
-    const totalAlmoco = baseMonthlyAlmoco*(m.mult/100);
-    const diasNoMes = diasAlmocoAbertos * (30.44/7);
-    const publico = (ticketAlmocoMedio>0 && diasNoMes>0) ? (totalAlmoco/ticketAlmocoMedio)/diasNoMes : 0;
-    return `<td style="color:var(--text-soft);font-size:11px;">${publico.toFixed(1)}</td>`;
+      <div style="font-size:9px;color:var(--text-soft);">${m.modo==='eur'?'queda: '+(refRevenue>0?((1-(m.valorEur||0)/refRevenue)*100).toFixed(0):'—')+'%':'≈ '+fmtEUR(receitaDoMes(m,refRevenue))}</div>
+    </td>`;
   }).join('') + '</tr>';
-  html += '<tr><td class="dia" style="color:var(--text-soft);font-weight:400;">— Estimado Jantar</td>' + editState.months.map(m=>`<td style="color:var(--text-soft);">${fmtEUR(baseMonthlyJantar*(m.mult/100))}</td>`).join('') + '</tr>';
-  html += '<tr><td class="dia" style="color:var(--text-soft);font-weight:400;">— Público Jantar (méd./dia)</td>' + editState.months.map(m=>{
-    const totalJantar = baseMonthlyJantar*(m.mult/100);
-    const diasNoMes = diasJantarAbertos * (30.44/7);
-    const publico = (ticketJantarMedio>0 && diasNoMes>0) ? (totalJantar/ticketJantarMedio)/diasNoMes : 0;
-    return `<td style="color:var(--text-soft);font-size:11px;">${publico.toFixed(1)}</td>`;
+  html += '<tr><td class="dia">Faturamento do mês</td>' + editState.months.map(m=>`<td style="font-weight:700;">${fmtEUR(receitaDoMes(m,refRevenue))}</td>`).join('') + '</tr>';
+  html += '<tr><td class="dia" style="padding-top:14px;color:var(--brass);font-weight:700;">Mix do faturamento</td>' + editState.months.map(()=>'<td></td>').join('') + '</tr>';
+  html += '<tr><td class="dia">% Almoço</td>' + editState.months.map((m,i)=>`<td><input type="number" min="0" max="100" value="${m.pctAlmoco}" onchange="updateMonthMix(${i},'pctAlmoco',this.value)"></td>`).join('') + '</tr>';
+  html += '<tr><td class="dia">% Delivery</td>' + editState.months.map((m,i)=>`<td><input type="number" min="0" max="100" value="${m.pctDelivery}" onchange="updateMonthMix(${i},'pctDelivery',this.value)"></td>`).join('') + '</tr>';
+  html += '<tr><td class="dia">% Jantar</td>' + editState.months.map((m,i)=>`<td><input type="number" min="0" max="100" value="${m.pctJantar}" onchange="updateMonthMix(${i},'pctJantar',this.value)"></td>`).join('') + '</tr>';
+  html += '<tr><td class="dia" style="font-size:10px;color:var(--text-soft);">Soma (deve ser 100%)</td>' + editState.months.map(m=>{
+    const soma = m.pctAlmoco+m.pctDelivery+m.pctJantar;
+    return `<td style="font-size:10px;color:${Math.round(soma)!==100?'var(--danger)':'var(--ok)'};">${soma.toFixed(0)}%</td>`;
   }).join('') + '</tr>';
-  html += '<tr><td class="dia">Faturamento estimado (total)</td>' + editState.months.map(m=>`<td style="font-weight:700;">${fmtEUR((baseMonthlyAlmoco+baseMonthlyJantar)*(m.mult/100))}</td>`).join('') + '</tr>';
+  html += '<tr><td class="dia" style="padding-top:14px;color:var(--brass);font-weight:700;">Público estimado (nº/mês)</td>' + editState.months.map(()=>'<td></td>').join('') + '</tr>';
+  html += '<tr><td class="dia">Público Almoço</td>' + editState.months.map(m=>{
+    const receita = receitaDoMes(m,refRevenue);
+    const publico = ticketA>0 ? (receita*m.pctAlmoco/100)/ticketA : 0;
+    return `<td>${publico.toFixed(0)}</td>`;
+  }).join('') + '</tr>';
+  html += '<tr><td class="dia">Público Delivery</td>' + editState.months.map(m=>{
+    const receita = receitaDoMes(m,refRevenue);
+    const publico = ticketD>0 ? (receita*m.pctDelivery/100)/ticketD : 0;
+    return `<td>${publico.toFixed(0)}</td>`;
+  }).join('') + '</tr>';
+  html += '<tr><td class="dia">Público Jantar</td>' + editState.months.map(m=>{
+    const receita = receitaDoMes(m,refRevenue);
+    const publico = ticketJ>0 ? (receita*m.pctJantar/100)/ticketJ : 0;
+    return `<td>${publico.toFixed(0)}</td>`;
+  }).join('') + '</tr>';
   t.innerHTML = html;
 }
 document.getElementById('cmv').addEventListener('change', computeAndRenderCards);
 document.getElementById('impostos').addEventListener('change', computeAndRenderCards);
 document.getElementById('salarioBase').addEventListener('change', ()=>{ readCustosFromForm(); renderExpenses(); computeAndRenderCards(); });
+['ticketAlmoco','ticketDelivery','ticketJantar'].forEach(id=>{
+  document.getElementById(id).addEventListener('change', ()=>{ readCustosFromForm(); renderMonths(); });
+});
 function fmtEUR(v){ return v.toLocaleString('pt-PT',{style:'currency',currency:'EUR',maximumFractionDigits:0}); }
+
 
 /* ---- Despesas mensais (12 colunas) ---- */
 function renderExpenses(){
   const t = document.getElementById('expensesTable');
   const c = editState.custos;
+  const refRevenue = getRefRevenue();
   let html = '<tr><td class="dia">Mês</td>' + MESES.map(m=>`<td style="font-weight:700;">${m}</td>`).join('') + '</tr>';
   html += '<tr><td class="dia">Nº funcionários</td>' + c.pessoalCount.map((n,i)=>`<td><input type="number" min="0" value="${n}" onchange="updateExpense('pessoalCount',${i},this.value)"></td>`).join('') + '</tr>';
   html += '<tr><td class="dia" style="color:var(--text-soft);font-weight:400;">→ Despesas com Pessoal</td>' + c.pessoalCount.map(n=>`<td style="color:var(--text-soft);">${fmtEUR(n*c.salarioBase)}</td>`).join('') + '</tr>';
   html += '<tr><td class="dia">Despesas Administrativas</td>' + c.admin.map((v,i)=>`<td><input type="number" min="0" value="${v}" onchange="updateExpense('admin',${i},this.value)"></td>`).join('') + '</tr>';
   html += '<tr><td class="dia">Despesas Financeiras</td>' + c.financeiras.map((v,i)=>`<td><input type="number" min="0" value="${v}" onchange="updateExpense('financeiras',${i},this.value)"></td>`).join('') + '</tr>';
   html += '<tr><td class="dia">Distribuição de Lucros / Pró-labore (sócios)</td>' + c.distribuicao.map((v,i)=>`<td><input type="number" min="0" value="${v}" onchange="updateExpense('distribuicao',${i},this.value)"></td>`).join('') + '</tr>';
+  html += '<tr><td class="dia" style="padding-top:12px;color:var(--text-soft);font-size:11px;">Faturamento do mês</td>' + editState.months.map(m=>`<td style="font-size:11px;color:var(--text-soft);">${fmtEUR(receitaDoMes(m,refRevenue))}</td>`).join('') + '</tr>';
+  html += '<tr><td class="dia" style="font-weight:700;">Sobra do mês <span style="font-size:9px;font-weight:400;">(fat. − despesas)</span></td>' + editState.months.map((m,i)=>{
+    const receita = receitaDoMes(m,refRevenue);
+    const cmvValor = receita*(c.cmv/100);
+    const despPessoal = (c.salarioBase||0)*(c.pessoalCount[i]||0);
+    const totalDespesas = cmvValor + despPessoal + c.admin[i] + c.financeiras[i] + c.distribuicao[i] + receita*(c.impostos/100);
+    const sobra = receita - totalDespesas;
+    return `<td style="font-weight:700;${sobra<0?'color:var(--danger);':'color:var(--ok);'}">${fmtEUR(sobra)}</td>`;
+  }).join('') + '</tr>';
   t.innerHTML = html;
 }
 function updateExpense(campo, i, val){
@@ -644,12 +682,12 @@ function updateExpense(campo, i, val){
   renderExpenses(); computeAndRenderCards();
 }
 
-function computeCenario(days, months, custos){
-  const base = baseMonthlyRevenueOf(days);
+function computeCenario(months, custos){
+  const refRevenue = (months.find(m=>m.isRef)||{}).valorEur || 0;
   let monthlyDRE = [], ivaAccumQuarter=0, cashCumulative=0, cashCumulativeBeforeDist=0;
   MESES.forEach((mes,i)=>{
-    const mult = months[i].mult/100;
-    const receita = (base.almoco+base.jantar) * mult;
+    const m = months[i];
+    const receita = m.modo==='eur' ? (m.valorEur||0) : refRevenue*(1-(m.queda||0)/100);
     const cmvValor = receita * (custos.cmv/100);
     const lucroBruto = receita - cmvValor;
     const despPessoal = (custos.salarioBase||0) * (custos.pessoalCount?.[i]||0);
@@ -675,7 +713,7 @@ function computeCenario(days, months, custos){
 }
 function computeAndRenderCards(){
   const custos = readCustosFromForm(); editState.custos = custos;
-  const r = computeCenario(editState.days, editState.months, custos);
+  const r = computeCenario(editState.months, custos);
   document.getElementById('cards').innerHTML = `
     <div class="card"><div class="label">Faturamento anual</div><div class="value">${fmtEUR(r.annualRevenue)}</div></div>
     <div class="card"><div class="label">Resultado líquido anual</div><div class="value">${fmtEUR(r.annualResult)}</div></div>
@@ -710,7 +748,7 @@ function renderComparison(){
   const out = document.getElementById('compareOutput');
   if(compareSelection.length < 2){ out.innerHTML = '<p class="desc">Selecione pelo menos 2 cenários.</p>'; return; }
   const selected = cenarios.filter(c=>compareSelection.includes(c.id));
-  const results = selected.map(c=>({ nome:c.nome, ...computeCenario(c.dias_turnos?.days||defaultDias(), migrarSazonalidade(c.sazonalidade), migrarCustos(c.custos)) }));
+  const results = selected.map(c=>({ nome:c.nome, ...computeCenario(migrarSazonalidade(c.sazonalidade), migrarCustos(c.custos)) }));
   let html = '<table class="dre-table"><tr><th>Indicador</th>' + results.map(r=>`<th>${r.nome}</th>`).join('') + '</tr>';
   [['Faturamento anual','annualRevenue'],['Resultado líquido anual','annualResult'],['Caixa antes da distribuição','cashCumulativeBeforeDist'],['Caixa livre (após pró-labore)','cashCumulative']].forEach(([label,key])=>{
     html += `<tr><td>${label}</td>` + results.map(r=>`<td class="${r[key]<0?'neg':''}">${fmtEUR(r[key])}</td>`).join('') + '</tr>';
