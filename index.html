@@ -794,6 +794,18 @@ async function loadEscalaData(){
   }
   escNecessidades = nRes.data || [];
   escAssignments = asRes.data || [];
+
+  // Limpeza: remove escalas presas de antes que já não batem com as folgas atuais do funcionário
+  const invalidas = escAssignments.filter(a=>{
+    const func = escFuncionarios.find(e=>e.id===a.funcionario_id);
+    return func && func.folgas[a.dia];
+  });
+  if(invalidas.length){
+    await sb.from('escala_assignments').delete().in('id', invalidas.map(x=>x.id));
+    const idsInvalidos = new Set(invalidas.map(x=>x.id));
+    escAssignments = escAssignments.filter(a=>!idsInvalidos.has(a.id));
+  }
+
   if(cRes.data){ escConfig = cRes.data; }
   else{
     const { data } = await sb.from('escala_config').insert({id:1, duracao_almoco:5, duracao_jantar:6}).select().maybeSingle();
