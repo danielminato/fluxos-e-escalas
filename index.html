@@ -872,6 +872,14 @@ async function toggleEscFolga(id, dayIdx, val){
   const e = escFuncionarios.find(x=>x.id===id); if(!e) return;
   e.folgas[dayIdx] = val;
   await sb.from('escala_funcionarios').update({folgas: e.folgas}).eq('id', id);
+  if(val){
+    // Marcar folga remove automaticamente qualquer escala já feita para esse dia (almoço e jantar)
+    const presos = escAssignments.filter(a=>a.dia===dayIdx && a.funcionario_id===id);
+    if(presos.length){
+      await sb.from('escala_assignments').delete().in('id', presos.map(p=>p.id));
+      escAssignments = escAssignments.filter(a=>!(a.dia===dayIdx && a.funcionario_id===id));
+    }
+  }
   renderEscAll();
 }
 async function addEscEmployee(){
